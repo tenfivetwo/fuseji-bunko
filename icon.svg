@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>ふせじ文庫</title>
+  <!-- 表紙 -->
+  <rect x="3" y="3" width="58" height="58" rx="12" fill="#8a3b2a"/>
+  <!-- 本文の紙 -->
+  <rect x="11" y="8" width="42" height="48" rx="3" fill="#fbf8f1"/>
+  <!-- 縦書きの行（右から左へ）。まん中の行の一部が伏字 -->
+  <g fill="#c9bea9">
+    <rect x="41" y="14" width="4" height="13" rx="2"/>
+    <rect x="41" y="31" width="4" height="19" rx="2"/>
+    <rect x="30" y="14" width="4" height="6" rx="2"/>
+    <rect x="30" y="43" width="4" height="7" rx="2"/>
+    <rect x="19" y="14" width="4" height="22" rx="2"/>
+    <rect x="19" y="40" width="4" height="6" rx="2"/>
+  </g>
+  <rect x="27.5" y="23" width="9" height="17" rx="1.5" fill="#2b2620"/>
+  <!-- 伏字の中の「？」 -->
+  <path d="M29.6 28.2a2.4 2.4 0 1 1 3.6 2.1c-.8.5-1.2 1-1.2 1.9v.6" fill="none" stroke="#fbf8f1" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="32" cy="36" r=".95" fill="#fbf8f1"/>
+  <!-- しおり -->
+  <path d="M47 3h6v13l-3-2.4L47 16z" fill="#e0b65a"/>
+</svg>
