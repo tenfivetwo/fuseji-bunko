@@ -1,0 +1,16 @@
+{
+  "name": "ふせじ文庫",
+  "short_name": "ふせじ文庫",
+  "description": "小説の伏字を、前後の流れから当てる文章ゲーム",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ece5d6",
+  "theme_color": "#8a3b2a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
