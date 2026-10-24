@@ -50,7 +50,7 @@ button:disabled { cursor: default; opacity: .45; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .row.center { justify-content: center; }
 
-button:not(.link):not(.blank):not(.toc-item):not(.opt):not(.chip):not(.seg-btn) {
+button:not(.link):not(.blank):not(.toc-item):not(.opt):not(.chip):not(.seg-btn):not(.editbtn):not(.sentbtn) {
   border: 1px solid var(--line); background: var(--paper); border-radius: 999px;
   padding: 8px 18px;
 }
@@ -233,3 +233,39 @@ body.vertical .reader-inner { max-width: 960px; }
 .lvgroup:first-of-type { margin-top: 18px; }
 .lvgroup summary { cursor: pointer; padding: 10px 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .lvgroup .toc { margin-top: 0; }
+
+/* スマホ用：書く伏字のボタンと、画面の上に出る入力窓 */
+.editbtn {
+  font: inherit; font-size: .95em; color: var(--ink); background: var(--field); writing-mode: inherit;
+  border: 0; border-block-end: 2px solid var(--blank); border-radius: 3px; padding: 0; padding-inline: 4px; line-height: 1.6;
+  max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: baseline; text-align: start;
+}
+.sentbtn {
+  display: block; inline-size: 100%; min-block-size: 3.6em; font: inherit; font-size: .95em; line-height: 1.8; color: var(--ink);
+  writing-mode: inherit; text-align: start; white-space: pre-wrap; background: var(--field);
+  border: 0; border-inline-start: 4px solid var(--blank); border-radius: 3px; padding: 6px 10px;
+}
+.editbtn .ph, .sentbtn .ph { color: var(--muted); }
+.editbtn.active, .sentbtn.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+body.editing { overflow: hidden; }
+.editor { position: fixed; left: 0; right: 0; top: 0; height: 100%; z-index: 40; background: rgba(20, 15, 10, .35); }
+.editor[hidden] { display: none; }
+.ed-panel {
+  max-width: 720px; margin: 0 auto; background: var(--paper); box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+  border-radius: 0 0 16px 16px; padding: 12px 16px 14px;
+}
+.ed-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 8px; }
+.ed-ctx {
+  font-family: var(--serif); line-height: 1.9; background: var(--bg); border-radius: 8px; padding: 8px 12px;
+  max-height: 8.5em; overflow-y: auto; margin-bottom: 10px;
+}
+.ctx-target { background: var(--accent); color: var(--accent-ink); border-radius: 3px; padding: 0 4px; }
+.ctx-other { color: var(--muted); border-bottom: 1px dashed var(--line); }
+.ed-hint { font-size: .85em; color: var(--part); margin-bottom: 6px; }
+#ed-input {
+  display: block; width: 100%; font-family: var(--serif); font-size: 18px; line-height: 1.6; color: var(--ink);
+  background: var(--field); border: 2px solid var(--accent); border-radius: 8px; padding: 8px 10px; resize: vertical;
+}
+#ed-input:focus { outline: none; box-shadow: 0 0 0 3px var(--part-bg); }
+.ed-nav { margin-top: 10px; }

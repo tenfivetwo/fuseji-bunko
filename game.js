@@ -27,6 +27,9 @@
   const app = document.getElementById('app');
   const sheet = document.getElementById('sheet');
   const reader = document.getElementById('reader');
+  const editor = document.getElementById('editor');
+  // スマホ（指で操作する端末）では、書く伏字を押すと画面の上に入力窓を出す。?ui=touch で試せる
+  const touchUI = () => window.matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).get('ui') === 'touch';
 
   const num = i => CIRCLED[i] || `(${i + 1})`;
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -172,6 +175,7 @@
 
   // ---- 目次 ----
   function renderHome() {
+    closeEditor(false);
     S = null;
     closeSheet();
     closeReader();
@@ -267,8 +271,11 @@
     const page = story.pages[pi];
     const { blanks, paras } = parsePage(page.text);
     closeReader();
+    closeEditor(false);
+    const paraOf = [];
+    paras.forEach((p, k) => p.parts.forEach(part => { if (part.t === 'blank') paraOf[part.i] = k; }));
     S = {
-      si, pi, story, page, blanks, paras,
+      si, pi, story, page, blanks, paras, paraOf, dialog: touchUI(),
       lv: LEVELS[page.level] || LEVELS[6],
       values: blanks.map(() => ''),
       hinted: blanks.map(() => false),
@@ -317,6 +324,7 @@
     if (part.t === 'text') return esc(part.v);
     const i = part.i, b = S.blanks[i];
     if (S.checked) return renderResult(i);
+    if (S.dialog && !(b.kind === 'word' && S.lv.mode === 'choice')) return renderEditButton(i);
     if (b.kind === 'sentence' && isPhrase(b)) {
       return `<span class="blank"><span class="num">${num(i)}</span><input data-i="${i}" value="${esc(S.values[i])}" style="inline-size:8em" autocomplete="off" enterkeyhint="next"></span>`;
     }
@@ -328,10 +336,34 @@
       const len = Math.max(...S.choices[i].map(o => [...o].length));
       return `<button class="blank choice ${v ? 'filled' : ''}" data-act="choose" data-i="${i}" style="inline-size:${len + 2.2}em"><span class="num">${num(i)}</span><span class="val">${v ? esc(v) : '？'}</span></button>`;
     }
-    const len = [...b.answers[0]].length;
-    const ph = S.lv.lengthHint ? '□'.repeat(len) : '';
-    const w = S.lv.lengthHint ? len + 1.4 : 5.5;
-    return `<span class="blank"><span class="num">${num(i)}</span><input data-i="${i}" value="${esc(S.values[i])}" placeholder="${ph}" style="inline-size:${w}em" autocomplete="off" enterkeyhint="next"></span>`;
+    return `<span class="blank"><span class="num">${num(i)}</span><input data-i="${i}" value="${esc(S.values[i])}" placeholder="${placeholderOf(i)}" style="inline-size:${fieldWidth(i)}em" autocomplete="off" enterkeyhint="next"></span>`;
+  }
+
+  // 書く伏字の幅（em）と、空のときに見せる字（Lv.3 は文字数の □）
+  function fieldWidth(i) {
+    const b = S.blanks[i];
+    if (b.kind === 'sentence') return 8;
+    return S.lv.lengthHint ? [...b.answers[0]].length + 1.4 : 5.5;
+  }
+  function placeholderOf(i) {
+    const b = S.blanks[i];
+    return b.kind === 'word' && S.lv.lengthHint ? '□'.repeat([...b.answers[0]].length) : '';
+  }
+
+  // スマホ用：書く伏字は押すと入力窓が開くボタンにする（本文の中では文字を打たない）
+  function editButtonInner(i) {
+    const v = S.values[i];
+    if (v) return esc(v);
+    const b = S.blanks[i];
+    if (b.kind === 'sentence' && !isPhrase(b)) return '<span class="ph">押して書く</span>';
+    return `<span class="ph">${placeholderOf(i) || '　'}</span>`;
+  }
+  function renderEditButton(i) {
+    const b = S.blanks[i];
+    if (b.kind === 'sentence' && !isPhrase(b)) {
+      return `<span class="sent"><span class="num">${num(i)}</span><button class="sentbtn" data-act="edit" data-i="${i}">${editButtonInner(i)}</button></span>`;
+    }
+    return `<span class="blank"><span class="num">${num(i)}</span><button class="editbtn" data-act="edit" data-i="${i}" style="inline-size:${fieldWidth(i)}em">${editButtonInner(i)}</button></span>`;
   }
 
   // 短い句は文中に入れ、長い文は段落として書かせる
@@ -417,6 +449,7 @@
   }
 
   function check() {
+    closeEditor();
     const empty = S.values.some(v => !v.trim());
     if (empty && !S.warned) { S.warned = true; renderPage(true); focusFirstEmpty(); return; }
     const results = S.blanks.map((b, i) => b.kind === 'word' ? judgeWord(b, S.values[i]) : judgeSentence(b, S.values[i]));
@@ -470,6 +503,90 @@
     app.querySelectorAll('.choice.active').forEach(el => el.classList.remove('active'));
     if (restore && wasOpen && sheetReturnY !== null) window.scrollTo(0, sheetReturnY);
     sheetReturnY = null;
+  }
+
+  // ---- 入力窓（スマホ用） ----
+  // キーボードは下から出るので、窓は画面の上に出す。本文は描き直さず、ページの位置も動かさない
+  let edAt = -1;
+  let edReturnY = null;
+  const writable = () => S.blanks.map((_, k) => k).filter(k => !(S.blanks[k].kind === 'word' && S.lv.mode === 'choice'));
+
+  function renderContext(i) {
+    const p = S.paras[S.paraOf[i]];
+    return p.parts.map(part => {
+      if (part.t === 'text') return esc(part.v);
+      if (part.i === i) return `<mark class="ctx-target">${esc(S.values[i]) || num(i)}</mark>`;
+      return `<span class="ctx-other">${esc(S.values[part.i]) || num(part.i)}</span>`;
+    }).join('');
+  }
+
+  function openEditor(i) {
+    if (!S || S.checked) return;
+    closeSheet();
+    if (edReturnY === null) edReturnY = window.scrollY;
+    edAt = i;
+    const b = S.blanks[i];
+    const multi = b.kind === 'sentence' && !isPhrase(b);
+    const list = writable();
+    const k = list.indexOf(i);
+    const prev = list[k - 1], next = list[k + 1];
+    const prevBtn = `<button data-act="ed-go" data-i="${prev}" ${prev === undefined ? 'disabled' : ''}>${dir === 'v' ? '前の伏字 →' : '← 前の伏字'}</button>`;
+    const nextBtn = next === undefined
+      ? '<button class="primary" data-act="ed-close">決定</button>'
+      : `<button class="primary" data-act="ed-go" data-i="${next}">${dir === 'v' ? '← 次の伏字' : '次の伏字 →'}</button>`;
+    const what = b.kind === 'word' ? '言葉' : multi ? '文' : '言葉のかたまり';
+    editor.innerHTML = `<div class="ed-panel" role="dialog" aria-label="${num(i)} に入る${what}">
+      <div class="ed-head"><span>${num(i)} に入る${what}</span><button class="link" data-act="ed-close">閉じる</button></div>
+      <div class="ed-ctx">${renderContext(i)}</div>
+      ${S.hinted[i] ? `<div class="ed-hint">ヒント：最初は「${esc(hintText(b))}」</div>` : ''}
+      ${multi
+        ? `<textarea id="ed-input" rows="3" placeholder="ここに入る文を書く">${esc(S.values[i])}</textarea>`
+        : `<input id="ed-input" value="${esc(S.values[i])}" placeholder="${placeholderOf(i)}" autocomplete="off" enterkeyhint="${next === undefined ? 'done' : 'next'}">`}
+      <div class="row center ed-nav">${dir === 'v' ? nextBtn + prevBtn : prevBtn + nextBtn}</div>
+    </div>`;
+    editor.hidden = false;
+    document.body.classList.add('editing');
+    app.querySelectorAll('[data-act="edit"]').forEach(el => el.classList.toggle('active', el.dataset.i === String(i)));
+    placeEditor();
+    // 前後の文の枠は、伏字のところが見えるまでスクロールしておく
+    const ctx = editor.querySelector('.ed-ctx');
+    const mark = ctx.querySelector('.ctx-target');
+    ctx.scrollTop = Math.max(0, mark.offsetTop - ctx.offsetTop - ctx.clientHeight / 3);
+    const inp = editor.querySelector('#ed-input');
+    inp.focus({ preventScroll: true });
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  }
+
+  function closeEditor(restore = true) {
+    if (!editor || editor.hidden) return;
+    editor.hidden = true;
+    editor.innerHTML = '';
+    document.body.classList.remove('editing');
+    app.querySelectorAll('[data-act="edit"].active').forEach(el => el.classList.remove('active'));
+    if (restore && edReturnY !== null) window.scrollTo(0, edReturnY);
+    edReturnY = null;
+    edAt = -1;
+  }
+
+  // キーボードが出て見えている範囲が動いても、窓をその上端に合わせる
+  function placeEditor() {
+    if (!editor || editor.hidden) return;
+    const vv = window.visualViewport;
+    editor.style.top = vv ? `${vv.offsetTop}px` : '0px';
+    editor.style.height = vv ? `${vv.height}px` : '100%';
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', placeEditor);
+    window.visualViewport.addEventListener('scroll', placeEditor);
+  }
+
+  function editorInput(v) {
+    if (edAt < 0) return;
+    S.values[edAt] = v;
+    const btn = app.querySelector(`[data-act="edit"][data-i="${edAt}"]`);
+    if (btn) btn.innerHTML = editButtonInner(edAt);
+    const mark = editor.querySelector('.ctx-target');
+    if (mark) mark.textContent = v || num(edAt);
   }
 
   // ---- 読み返し ----
@@ -550,6 +667,7 @@
     const el = e.target.closest('[data-act]');
     if (!el) {
       if (!sheet.hidden && !e.target.closest('.sheet')) closeSheet(true);
+      if (e.target === editor) closeEditor(); // 窓の外（うす暗いところ）を押したら閉じる
       return;
     }
     const act = el.dataset.act;
@@ -574,6 +692,9 @@
         break;
       }
       case 'close': closeSheet(true); break;
+      case 'edit': openEditor(i); break;
+      case 'ed-go': openEditor(i); break;
+      case 'ed-close': closeEditor(); break;
       case 'reader-open': openReader(S.pi - 1); break;
       case 'reader-go': openReader(Number(el.dataset.p)); break;
       case 'reader-close': closeReader(); break;
@@ -607,13 +728,22 @@
 
   document.addEventListener('input', e => {
     if (!S || S.checked) return;
+    if (e.target.id === 'ed-input') { editorInput(e.target.value); return; }
     const i = e.target.dataset && e.target.dataset.i;
     if (i !== undefined && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) S.values[Number(i)] = e.target.value;
   });
 
   // Enter で次の伏字へ（文の欄は Ctrl+Enter）
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeSheet(true); closeReader(); return; }
+    if (e.key === 'Escape') { closeSheet(true); closeEditor(); closeReader(); return; }
+    // 入力窓：Enter で次の伏字へ（最後なら閉じる）。文の欄は改行のまま
+    if (e.key === 'Enter' && !e.isComposing && e.target.id === 'ed-input' && e.target.tagName === 'INPUT') {
+      e.preventDefault();
+      const list = writable();
+      const next = list[list.indexOf(edAt) + 1];
+      if (next === undefined) closeEditor(); else openEditor(next);
+      return;
+    }
     if (e.key !== 'Enter' || e.isComposing || !S || S.checked) return;
     const t = e.target;
     if (t.tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return;
