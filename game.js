@@ -279,7 +279,10 @@
     window.scrollTo(0, 0);
   }
 
-  function renderPage() {
+  // keep: 同じページを描き直すとき、画面と本文の枠のスクロール位置をそのまま保つ
+  function renderPage(keep) {
+    const old = app.querySelector('.paper');
+    const pos = keep && old ? { y: window.scrollY, left: old.scrollLeft, top: old.scrollTop } : null;
     const { story, page, pi, lv } = S;
     const prev = story.pages[pi - 1];
     const levelUp = prev && page.level > prev.level && !S.checked;
@@ -301,6 +304,13 @@
       ${renderHints()}
       ${renderFooter()}`;
     applyDir();
+    if (pos) {
+      const paper = app.querySelector('.paper');
+      paper.scrollLeft = pos.left;
+      paper.scrollTop = pos.top;
+      window.scrollTo(0, pos.y);
+      updateScrollHint();
+    }
   }
 
   function renderPart(part) {
@@ -315,7 +325,8 @@
     }
     if (S.lv.mode === 'choice') {
       const v = S.values[i];
-      return `<button class="blank choice ${v ? 'filled' : ''}" data-act="choose" data-i="${i}"><span class="num">${num(i)}</span>${v ? esc(v) : '？'}</button>`;
+      const len = Math.max(...S.choices[i].map(o => [...o].length));
+      return `<button class="blank choice ${v ? 'filled' : ''}" data-act="choose" data-i="${i}" style="inline-size:${len + 2.2}em"><span class="num">${num(i)}</span><span class="val">${v ? esc(v) : '？'}</span></button>`;
     }
     const len = [...b.answers[0]].length;
     const ph = S.lv.lengthHint ? '□'.repeat(len) : '';
@@ -407,7 +418,7 @@
 
   function check() {
     const empty = S.values.some(v => !v.trim());
-    if (empty && !S.warned) { S.warned = true; renderPage(); focusFirstEmpty(); return; }
+    if (empty && !S.warned) { S.warned = true; renderPage(true); focusFirstEmpty(); return; }
     const results = S.blanks.map((b, i) => b.kind === 'word' ? judgeWord(b, S.values[i]) : judgeSentence(b, S.values[i]));
     S.raw = results.map(r => r.score);
     S.yomi = results.map(r => r.yomi || '');
@@ -434,6 +445,7 @@
   }
 
   // ---- 選択肢のシート ----
+  let sheetReturnY = null; // 伏字が枠に隠れないように画面をずらしたとき、閉じたら戻る位置
   function openSheet(i) {
     sheet.innerHTML = `<div class="sheet-inner">
       <div class="sheet-head"><span>${num(i)} に入る言葉は？</span><button class="link" data-act="close">閉じる</button></div>
@@ -445,12 +457,19 @@
     if (target) {
       const r = target.getBoundingClientRect();
       const limit = window.innerHeight - sheet.offsetHeight - 16;
-      if (r.bottom > limit) window.scrollBy({ top: r.bottom - limit, behavior: 'smooth' });
+      if (r.bottom > limit) {
+        if (sheetReturnY === null) sheetReturnY = window.scrollY;
+        window.scrollBy(0, r.bottom - limit);
+      }
     }
   }
-  function closeSheet() {
+  function closeSheet(restore) {
+    const wasOpen = !sheet.hidden;
     sheet.hidden = true;
     sheet.innerHTML = '';
+    app.querySelectorAll('.choice.active').forEach(el => el.classList.remove('active'));
+    if (restore && wasOpen && sheetReturnY !== null) window.scrollTo(0, sheetReturnY);
+    sheetReturnY = null;
   }
 
   // ---- 読み返し ----
@@ -530,7 +549,7 @@
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');
     if (!el) {
-      if (!sheet.hidden && !e.target.closest('.sheet')) closeSheet();
+      if (!sheet.hidden && !e.target.closest('.sheet')) closeSheet(true);
       return;
     }
     const act = el.dataset.act;
@@ -544,18 +563,23 @@
         break;
       case 'open': openPage(Number(el.dataset.s), Number(el.dataset.p)); break;
       case 'choose': openSheet(i); break;
-      case 'pick':
+      case 'pick': {
         S.values[i] = el.dataset.v;
-        closeSheet();
-        renderPage();
+        const btn = app.querySelector(`.choice[data-i="${i}"]`);
+        if (btn) {
+          btn.classList.add('filled');
+          btn.querySelector('.val').textContent = el.dataset.v;
+        }
+        closeSheet(true);
         break;
-      case 'close': closeSheet(); break;
+      }
+      case 'close': closeSheet(true); break;
       case 'reader-open': openReader(S.pi - 1); break;
       case 'reader-go': openReader(Number(el.dataset.p)); break;
       case 'reader-close': closeReader(); break;
-      case 'hint': S.hinted[i] = true; renderPage(); break;
+      case 'hint': S.hinted[i] = true; renderPage(true); break;
       case 'check': check(); break;
-      case 'self': S.self[i] = true; record(); renderPage(); break;
+      case 'self': S.self[i] = true; record(); renderPage(true); break;
       case 'retry': openPage(S.si, S.pi); break;
       case 'next':
         if (S.story.collection) {
@@ -589,7 +613,7 @@
 
   // Enter で次の伏字へ（文の欄は Ctrl+Enter）
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeSheet(); closeReader(); return; }
+    if (e.key === 'Escape') { closeSheet(true); closeReader(); return; }
     if (e.key !== 'Enter' || e.isComposing || !S || S.checked) return;
     const t = e.target;
     if (t.tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return;

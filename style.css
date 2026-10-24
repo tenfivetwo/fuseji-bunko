@@ -114,11 +114,11 @@ button.reread { margin-inline-start: auto; padding: 4px 14px !important; font-si
 
 .num { font-family: var(--sans); font-size: .72em; margin-inline-end: 2px; opacity: .8; }
 .blank.choice {
-  display: inline-flex; align-items: center; gap: 2px; min-inline-size: 4.5em; justify-content: center;
+  display: inline-flex; align-items: center; gap: 2px; justify-content: center; white-space: nowrap; box-sizing: border-box;
   background: var(--blank); color: var(--blank-ink); border: 0; border-radius: 3px;
   padding: 0; padding-inline: 10px; line-height: 1.7; writing-mode: inherit; font-family: var(--serif); text-indent: 0; vertical-align: baseline;
 }
-.blank.choice.filled { background: var(--field); color: var(--ink); border-block-end: 2px solid var(--accent); }
+.blank.choice.filled { background: var(--field); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .blank.choice.active { outline: 2px solid var(--accent); outline-offset: 1px; }
 span.blank { white-space: nowrap; text-indent: 0; }
 span.blank input {
