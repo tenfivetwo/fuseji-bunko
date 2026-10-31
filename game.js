@@ -213,7 +213,7 @@
       <details class="levels">
         <summary>難易度のしくみ</summary>
         <dl>${Object.entries(LEVELS).map(([k, l]) => `<dt><span class="lv-badge lv${k}">Lv.${k}</span> ${esc(l.name)}</dt><dd>${esc(l.desc)}</dd>`).join('')}</dl>
-        <p class="muted">Lv.3 からはヒント（最初の文字）を見られます。使った伏字は半分の点になります。<br>Lv.4 からは答え合わせが3回までできます。1・2回目は合っている伏字だけが開き、ちがうところは ×（おしいときは △）の印だけが付きます。3回目で答えがすべて出ます。<br>文を書く問題は、大事な言葉が入っているかで判定します。判定がきびしすぎると思ったら「この答えでも合っている」で○にできます。</p>
+        <p class="muted">Lv.3 からはヒント（最初の文字）を見られます。使った伏字は半分の点になります。<br>Lv.4 からは答え合わせが3回までできます。1・2回目は合っている伏字だけが開き、ちがうところは ×（おしいときは △）の印だけが付きます。3回目で答えがすべて出ます。2回目で合うと半分、3回目で合うと4分の1の点です。<br>文を書く問題は、大事な言葉が入っているかで判定します。判定がきびしすぎると思ったら「この答えでも合っている」で○にできます。</p>
       </details>
       <p class="foot"><button class="link" data-act="reset">記録を消す</button></p>
       <p class="foot credit">漢字の読み：<a href="https://www.edrdg.org/wiki/index.php/KANJIDIC_Project" target="_blank" rel="noopener">KANJIDIC2</a>（EDRDG, CC BY-SA 4.0）</p>`;
@@ -283,6 +283,7 @@
       checked: false, raw: blanks.map(() => 0), yomi: blanks.map(() => ''), self: [], warned: false,
       // Lv.4 からは答え合わせを3回まで。1・2回目は合っている伏字だけを開き（locked）、ほかは ×／△ の印だけ（missed）
       attempt: 0, locked: blanks.map(() => false), missed: blanks.map(() => 0),
+      gotAt: blanks.map(() => 1), // 何回目の答え合わせで決まったか（点の割合に使う）
     };
     renderPage();
     window.scrollTo(0, 0);
@@ -396,8 +397,11 @@
     </div>`;
   }
 
+  // 2回目で合えば半分、3回目は4分の1。ヒントを使えばさらに半分
+  const TRY_RATE = [1, 0.5, 0.25];
+  const tryRate = i => TRY_RATE[Math.min(S.gotAt[i], TRY_RATE.length) - 1];
   function scoreOf(i) {
-    const s = S.self[i] ? 1 : S.raw[i];
+    const s = (S.self[i] ? 1 : S.raw[i]) * tryRate(i);
     return S.hinted[i] ? s * 0.5 : s;
   }
   function pageRatio() {
@@ -413,7 +417,7 @@
         return `<div class="actions">
           ${warn}
           <button class="primary big" data-act="check">答え合わせ</button>
-          ${tries > 1 ? `<p class="muted small tries-note">答え合わせは${tries}回まで。${tries - 1}回目までは、合っている伏字だけが開きます。</p>` : ''}
+          ${tries > 1 ? `<p class="muted small tries-note">答え合わせは${tries}回まで。${tries - 1}回目までは、合っている伏字だけが開きます。<br>2回目で合うと半分、3回目で合うと4分の1の点です。</p>` : ''}
         </div>`;
       }
       const okN = S.locked.filter(Boolean).length;
@@ -448,13 +452,14 @@
     if (last) return 'おわりへ';
     return dir === 'v' ? '← 次のページへ' : '次のページへ →';
   }
-  const fmt = n => Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
+  const fmt = n => Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
 
   function renderResult(i) {
     const b = S.blanks[i];
     const v = S.values[i].trim();
     const ok = S.raw[i] === 1 || S.self[i];
-    const hintNote = S.hinted[i] ? '<span class="muted small">（ヒント）</span>' : '';
+    const hintNote = (S.hinted[i] ? '<span class="muted small">（ヒント）</span>' : '')
+      + (S.gotAt[i] > 1 && (ok || S.raw[i] > 0) ? `<span class="muted small">（${S.gotAt[i]}回目）</span>` : '');
     if (b.kind === 'word') {
       const yomiNote = S.yomi[i] && !S.self[i] ? `<span class="muted small">（読みが同じ：${esc(S.yomi[i])}）</span>` : '';
       if (ok) return `<mark class="ok"><span class="num">${num(i)}</span>${esc(v)}${hintNote}${yomiNote}</mark>`;
@@ -486,6 +491,7 @@
       const r = b.kind === 'word' ? judgeWord(b, S.values[i]) : judgeSentence(b, S.values[i]);
       S.raw[i] = r.score;
       S.yomi[i] = r.yomi || '';
+      S.gotAt[i] = Math.min(S.attempt + 1, maxTries());
       if (r.score === 1) S.locked[i] = true; else S.missed[i] = r.score;
     }
     if (!reveal) S.attempt++;
