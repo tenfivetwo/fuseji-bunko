@@ -43,6 +43,57 @@
   function getProg(id) { const p = loadAll()[id] || {}; return { reached: p.reached || 0, best: p.best || {} }; }
   function setProg(id, p) { const all = loadAll(); all[id] = p; saveAll(all); }
 
+  // ---- 記録の書き出し・読み込み ----
+  // ホーム画面のアイコンを入れ替えたり端末を替えたりしても、記録を持ち運べるようにする。
+  // 記録（STORE_KEY）と文字の向き（DIR_KEY）を JSON にして、「FUSEJI1:」付きの文字列（base64）にする
+  const EXPORTED_KEY = 'fuseji-bunko-exported'; // 最後に書き出した日
+  const CODE_HEAD = 'FUSEJI1:';
+  function storageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function storageSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+
+  function exportCode() {
+    const json = JSON.stringify({ app: 'fuseji-bunko', v: 1, at: new Date().toISOString(), progress: loadAll(), dir });
+    const bytes = new TextEncoder().encode(json);
+    let bin = '';
+    bytes.forEach(b => { bin += String.fromCharCode(b); });
+    return CODE_HEAD + btoa(bin);
+  }
+  // 読めない文字列なら null
+  function parseCode(text) {
+    const t = String(text || '').replace(/\s+/g, '');
+    if (!t.startsWith(CODE_HEAD)) return null;
+    try {
+      const bin = atob(t.slice(CODE_HEAD.length));
+      const json = new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+      const d = JSON.parse(json);
+      return d && d.app === 'fuseji-bunko' && d.progress && typeof d.progress === 'object' ? d : null;
+    } catch (e) { return null; }
+  }
+  // 今の記録と合わせる：どこまで進んだかと点数は、高いほうを残す
+  function mergeProgress(cur, inc) {
+    for (const [id, b] of Object.entries(inc)) {
+      if (!b || typeof b !== 'object') continue;
+      const a = cur[id] || { reached: 0, best: {} };
+      a.reached = Math.max(Number(a.reached) || 0, Number(b.reached) || 0);
+      a.best = a.best || {};
+      for (const [k, v] of Object.entries(b.best || {})) a.best[k] = Math.max(Number(a.best[k]) || 0, Number(v) || 0);
+      if (b.done) a.done = true;
+      cur[id] = a;
+    }
+    return cur;
+  }
+  const countPlayed = progress => Object.values(progress).reduce((n, p) => n + Object.keys((p && p.best) || {}).length, 0);
+
+  // ブラウザに「この記録は消さないで」と頼む（空き容量が少ないときなどに勝手に消されないように）
+  let persisted = false;
+  async function askPersist() {
+    try {
+      if (!navigator.storage || !navigator.storage.persist) return;
+      persisted = (await navigator.storage.persisted()) || (await navigator.storage.persist());
+    } catch (e) { /* 頼めなくても遊べる */ }
+  }
+  if (navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(v => { persisted = v; }).catch(() => {});
+
   // ---- 本文の読み取り ----
   // [正解/別解|ダミー/ダミー] と [[見本|鍵語,鍵語;鍵語]] を伏字に変える
   function parseLine(line, blanks) {
@@ -215,7 +266,12 @@
         <dl>${Object.entries(LEVELS).map(([k, l]) => `<dt><span class="lv-badge lv${k}">Lv.${k}</span> ${esc(l.name)}</dt><dd>${esc(l.desc)}</dd>`).join('')}</dl>
         <p class="muted">Lv.3 からはヒント（最初の文字）を見られます。使った伏字は半分の点になります。<br>Lv.4 からは答え合わせが3回までできます。1・2回目は合っている伏字だけが開き、ちがうところは ×（おしいときは △）の印だけが付きます。3回目で答えがすべて出ます。2回目で合うと半分、3回目で合うと4分の1の点です。<br>文を書く問題は、大事な言葉が入っているかで判定します。判定がきびしすぎると思ったら「この答えでも合っている」で○にできます。</p>
       </details>
-      <p class="foot"><button class="link" data-act="reset">記録を消す</button></p>
+      <p class="foot">
+        <button class="link" data-act="export">記録を書き出す</button>
+        <button class="link" data-act="import">記録を読み込む</button>
+        <button class="link" data-act="reset">記録を消す</button>
+      </p>
+      <p class="foot small muted">${lastExportNote()}</p>
       <p class="foot credit">漢字の読み：<a href="https://www.edrdg.org/wiki/index.php/KANJIDIC_Project" target="_blank" rel="noopener">KANJIDIC2</a>（EDRDG, CC BY-SA 4.0）</p>`;
     applyDir();
     window.scrollTo(0, 0);
@@ -515,6 +571,7 @@
     p.reached = Math.max(p.reached, Math.min(S.pi + 1, S.story.pages.length - 1));
     if (S.pi === S.story.pages.length - 1) p.done = true;
     setProg(S.story.id, p);
+    if (!persisted) askPersist();
   }
 
   function focusFirstEmpty() {
@@ -714,6 +771,7 @@
     if (!el) {
       if (!sheet.hidden && !e.target.closest('.sheet')) closeSheet(true);
       if (e.target === editor) closeEditor(); // 窓の外（うす暗いところ）を押したら閉じる
+      if (e.target === modal) closeModal();
       return;
     }
     const act = el.dataset.act;
@@ -770,8 +828,136 @@
       case 'reset':
         if (confirm('すべての記録を消しますか？')) { saveAll({}); renderHome(); }
         break;
+      case 'export': openExport(); break;
+      case 'import': openImport(); break;
+      case 'copy-code': copyCode(); break;
+      case 'save-code': saveCodeFile(); break;
+      case 'do-import': doImport(); break;
+      case 'modal-close': closeModal(); break;
     }
   });
+
+  // ---- 書き出し・読み込みの窓 ----
+  const modal = document.getElementById('modal');
+  function lastExportNote() {
+    const at = storageGet(EXPORTED_KEY);
+    if (!at) return 'まだ記録を書き出していません。ホーム画面のアイコンを入れ替える前や、端末を替える前に書き出しておくと安心です。';
+    const d = new Date(at);
+    return `最後に記録を書き出した日：${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  }
+  function openModal(html) {
+    closeSheet();
+    modal.innerHTML = `<div class="modal-panel" role="dialog">${html}</div>`;
+    modal.hidden = false;
+  }
+  function closeModal() {
+    if (!modal || modal.hidden) return;
+    modal.hidden = true;
+    modal.innerHTML = '';
+  }
+  function setMsg(id, text, bad) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('bad', !!bad);
+  }
+  function markExported() {
+    storageSet(EXPORTED_KEY, new Date().toISOString());
+    if (!S) renderHome();
+  }
+
+  function openExport() {
+    const code = exportCode();
+    const n = countPlayed(loadAll());
+    openModal(`
+      <h3>記録を書き出す</h3>
+      <p>下の文字列が、いまの記録（${n}ページ・話ぶん）です。メモなどに貼るか、ファイルに保存して取っておいてください。<br>
+      新しいアイコンや別の端末で「記録を読み込む」に入れると、元に戻せます。</p>
+      <textarea class="code" id="export-code" readonly rows="4">${esc(code)}</textarea>
+      <div class="row">
+        <button class="primary" data-act="copy-code">コピー</button>
+        <button data-act="save-code">ファイルに保存</button>
+        <button data-act="modal-close">閉じる</button>
+      </div>
+      <p class="modal-msg" id="export-msg"></p>
+      <p class="muted small">${persisted ? 'このブラウザには「記録を消さないで」とお願いしてあります。' : 'ブラウザによっては、空き容量が少ないときなどに記録が消えることがあります。ときどき書き出しておくと安心です。'}</p>`);
+  }
+  async function copyCode() {
+    const box = document.getElementById('export-code');
+    if (!box) return;
+    try {
+      await navigator.clipboard.writeText(box.value);
+      setMsg('export-msg', 'コピーしました。メモなどに貼って取っておいてください。');
+      markExported();
+    } catch (e) {
+      // 新しいやり方でコピーできないときは古いやり方を試し、それもだめなら選んだ状態にして手でコピーしてもらう
+      box.focus();
+      box.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+      if (ok) {
+        setMsg('export-msg', 'コピーしました。メモなどに貼って取っておいてください。');
+        markExported();
+      } else {
+        setMsg('export-msg', 'うまくコピーできませんでした。文字列を選んだので、長押し（または Ctrl+C）でコピーしてください。', true);
+      }
+    }
+  }
+  function saveCodeFile() {
+    const box = document.getElementById('export-code');
+    if (!box) return;
+    const d = new Date();
+    const name = `fuseji-kiroku-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.txt`;
+    const url = URL.createObjectURL(new Blob([box.value], { type: 'text/plain' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setMsg('export-msg', `「${name}」として保存しました。`);
+    markExported();
+  }
+
+  function openImport() {
+    openModal(`
+      <h3>記録を読み込む</h3>
+      <p>書き出した記録の文字列を貼るか、保存したファイルを選んでください。<br>
+      いまの記録と合わせて、どこまで進んだかと点数は<b>高いほう</b>を残します（いまの記録は消えません）。</p>
+      <textarea class="code" id="import-code" rows="4" placeholder="FUSEJI1:……"></textarea>
+      <div class="row">
+        <label class="filebtn">ファイルを選ぶ<input type="file" id="import-file" accept=".txt,text/plain" hidden></label>
+        <button class="primary" data-act="do-import">読み込む</button>
+        <button data-act="modal-close">閉じる</button>
+      </div>
+      <p class="modal-msg" id="import-msg"></p>`);
+    document.getElementById('import-file').addEventListener('change', async e => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      document.getElementById('import-code').value = await f.text();
+      setMsg('import-msg', `「${f.name}」を開きました。「読み込む」を押してください。`);
+    });
+  }
+  function doImport() {
+    const box = document.getElementById('import-code');
+    const d = parseCode(box && box.value);
+    if (!d) {
+      setMsg('import-msg', '記録として読めませんでした。「FUSEJI1:」から始まる文字列を、最後までそのまま貼ってください。', true);
+      return;
+    }
+    const before = countPlayed(loadAll());
+    const merged = mergeProgress(loadAll(), d.progress);
+    saveAll(merged);
+    if (d.dir === 'v' || d.dir === 'h') {
+      dir = d.dir;
+      storageSet(DIR_KEY, dir);
+    }
+    askPersist();
+    renderHome();
+    const after = countPlayed(merged);
+    setMsg('import-msg', `読み込みました。記録のあるページ・話：${before} → ${after}`);
+  }
 
   document.addEventListener('input', e => {
     if (!S || S.checked) return;
@@ -782,7 +968,7 @@
 
   // Enter で次の伏字へ（文の欄は Ctrl+Enter）
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeSheet(true); closeEditor(); closeReader(); return; }
+    if (e.key === 'Escape') { closeModal(); closeSheet(true); closeEditor(); closeReader(); return; }
     // 入力窓：Enter で次の伏字へ（最後なら閉じる）。文の欄は改行のまま
     if (e.key === 'Enter' && !e.isComposing && e.target.id === 'ed-input' && e.target.tagName === 'INPUT') {
       e.preventDefault();
