@@ -269,3 +269,16 @@ body.editing { overflow: hidden; }
 }
 #ed-input:focus { outline: none; box-shadow: 0 0 0 3px var(--part-bg); }
 .ed-nav { margin-top: 10px; }
+
+/* Lv.4 からの答え合わせ（1・2回目）：外れた伏字の印 */
+.miss {
+  display: inline-block; font-family: var(--sans); font-weight: 700; font-size: .8em; line-height: 1;
+  color: var(--ng); background: var(--ng-bg); border-radius: 999px; padding: 2px 5px; margin-inline-end: 2px;
+  text-indent: 0; text-combine-upright: all;
+}
+.miss.part { color: var(--part); background: var(--part-bg); }
+.blank.missed input, .blank.missed .editbtn { border-block-end-color: var(--ng); }
+.sent.missed textarea, .sent.missed .sentbtn { border-inline-start-color: var(--ng); }
+.retry-msg { margin: 0 0 12px; }
+.tries-note { margin: 8px 0 0; }
+.actions.retry .link { margin-top: 6px; }

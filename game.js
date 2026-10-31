@@ -213,7 +213,7 @@
       <details class="levels">
         <summary>難易度のしくみ</summary>
         <dl>${Object.entries(LEVELS).map(([k, l]) => `<dt><span class="lv-badge lv${k}">Lv.${k}</span> ${esc(l.name)}</dt><dd>${esc(l.desc)}</dd>`).join('')}</dl>
-        <p class="muted">Lv.3 からはヒント（最初の文字）を見られます。使った伏字は半分の点になります。<br>文を書く問題は、大事な言葉が入っているかで判定します。判定がきびしすぎると思ったら「この答えでも合っている」で○にできます。</p>
+        <p class="muted">Lv.3 からはヒント（最初の文字）を見られます。使った伏字は半分の点になります。<br>Lv.4 からは答え合わせが3回までできます。1・2回目は合っている伏字だけが開き、ちがうところは ×（おしいときは △）の印だけが付きます。3回目で答えがすべて出ます。<br>文を書く問題は、大事な言葉が入っているかで判定します。判定がきびしすぎると思ったら「この答えでも合っている」で○にできます。</p>
       </details>
       <p class="foot"><button class="link" data-act="reset">記録を消す</button></p>
       <p class="foot credit">漢字の読み：<a href="https://www.edrdg.org/wiki/index.php/KANJIDIC_Project" target="_blank" rel="noopener">KANJIDIC2</a>（EDRDG, CC BY-SA 4.0）</p>`;
@@ -280,7 +280,9 @@
       values: blanks.map(() => ''),
       hinted: blanks.map(() => false),
       choices: blanks.map(b => b.kind === 'word' ? shuffle([b.answers[0], ...b.dummies]) : null),
-      checked: false, raw: [], yomi: [], self: [], warned: false,
+      checked: false, raw: blanks.map(() => 0), yomi: blanks.map(() => ''), self: [], warned: false,
+      // Lv.4 からは答え合わせを3回まで。1・2回目は合っている伏字だけを開き（locked）、ほかは ×／△ の印だけ（missed）
+      attempt: 0, locked: blanks.map(() => false), missed: blanks.map(() => 0),
     };
     renderPage();
     window.scrollTo(0, 0);
@@ -323,21 +325,32 @@
   function renderPart(part) {
     if (part.t === 'text') return esc(part.v);
     const i = part.i, b = S.blanks[i];
-    if (S.checked) return renderResult(i);
+    if (S.checked || S.locked[i]) return renderResult(i);
     if (S.dialog && !(b.kind === 'word' && S.lv.mode === 'choice')) return renderEditButton(i);
     if (b.kind === 'sentence' && isPhrase(b)) {
-      return `<span class="blank"><span class="num">${num(i)}</span><input data-i="${i}" value="${esc(S.values[i])}" style="inline-size:8em" autocomplete="off" enterkeyhint="next"></span>`;
+      return `<span class="blank ${missCls(i)}">${lead(i)}<input data-i="${i}" value="${esc(S.values[i])}" style="inline-size:8em" autocomplete="off" enterkeyhint="next"></span>`;
     }
     if (b.kind === 'sentence') {
-      return `<span class="sent"><span class="num">${num(i)}</span><textarea data-i="${i}" rows="2" placeholder="ここに入る言葉や文を書く">${esc(S.values[i])}</textarea></span>`;
+      return `<span class="sent ${missCls(i)}">${lead(i)}<textarea data-i="${i}" rows="2" placeholder="ここに入る言葉や文を書く">${esc(S.values[i])}</textarea></span>`;
     }
     if (S.lv.mode === 'choice') {
       const v = S.values[i];
       const len = Math.max(...S.choices[i].map(o => [...o].length));
       return `<button class="blank choice ${v ? 'filled' : ''}" data-act="choose" data-i="${i}" style="inline-size:${len + 2.2}em"><span class="num">${num(i)}</span><span class="val">${v ? esc(v) : '？'}</span></button>`;
     }
-    return `<span class="blank"><span class="num">${num(i)}</span><input data-i="${i}" value="${esc(S.values[i])}" placeholder="${placeholderOf(i)}" style="inline-size:${fieldWidth(i)}em" autocomplete="off" enterkeyhint="next"></span>`;
+    return `<span class="blank ${missCls(i)}">${lead(i)}<input data-i="${i}" value="${esc(S.values[i])}" placeholder="${placeholderOf(i)}" style="inline-size:${fieldWidth(i)}em" autocomplete="off" enterkeyhint="next"></span>`;
   }
+
+  // 書く伏字の頭（番号と、前の答え合わせで外れていたときの ×／△）
+  const missed = i => S.attempt > 0 && !S.locked[i];
+  const missCls = i => missed(i) ? 'missed' : '';
+  function lead(i) {
+    const mark = !missed(i) ? '' : S.missed[i] > 0
+      ? '<span class="miss part" title="おしい">△</span>'
+      : '<span class="miss" title="ちがう">×</span>';
+    return `<span class="num">${num(i)}</span>${mark}`;
+  }
+  const maxTries = () => (S.page.level >= 4 ? 3 : 1);
 
   // 書く伏字の幅（em）と、空のときに見せる字（Lv.3 は文字数の □）
   function fieldWidth(i) {
@@ -361,9 +374,9 @@
   function renderEditButton(i) {
     const b = S.blanks[i];
     if (b.kind === 'sentence' && !isPhrase(b)) {
-      return `<span class="sent"><span class="num">${num(i)}</span><button class="sentbtn" data-act="edit" data-i="${i}">${editButtonInner(i)}</button></span>`;
+      return `<span class="sent ${missCls(i)}">${lead(i)}<button class="sentbtn" data-act="edit" data-i="${i}">${editButtonInner(i)}</button></span>`;
     }
-    return `<span class="blank"><span class="num">${num(i)}</span><button class="editbtn" data-act="edit" data-i="${i}" style="inline-size:${fieldWidth(i)}em">${editButtonInner(i)}</button></span>`;
+    return `<span class="blank ${missCls(i)}">${lead(i)}<button class="editbtn" data-act="edit" data-i="${i}" style="inline-size:${fieldWidth(i)}em">${editButtonInner(i)}</button></span>`;
   }
 
   // 短い句は文中に入れ、長い文は段落として書かせる
@@ -377,7 +390,7 @@
     if (S.checked || S.lv.mode === 'choice') return '';
     return `<div class="hints">
       <span class="muted">ヒント（最初の文字。使った伏字は半分の点）</span>
-      <div class="row">${S.blanks.map((b, i) => S.hinted[i]
+      <div class="row">${S.blanks.map((b, i) => S.locked[i] ? '' : S.hinted[i]
         ? `<span class="hint-open">${num(i)} ${esc(hintText(b))}…</span>`
         : `<button class="chip" data-act="hint" data-i="${i}">${num(i)}</button>`).join('')}</div>
     </div>`;
@@ -394,9 +407,23 @@
 
   function renderFooter() {
     if (!S.checked) {
-      return `<div class="actions">
-        ${S.warned ? `<p class="warn">まだ空いている伏字があります。もう一度押すと、このまま答え合わせします。</p>` : ''}
-        <button class="primary big" data-act="check">答え合わせ</button>
+      const warn = S.warned ? `<p class="warn">まだ空いている伏字があります。もう一度押すと、このまま答え合わせします。</p>` : '';
+      const tries = maxTries();
+      if (S.attempt === 0) {
+        return `<div class="actions">
+          ${warn}
+          <button class="primary big" data-act="check">答え合わせ</button>
+          ${tries > 1 ? `<p class="muted small tries-note">答え合わせは${tries}回まで。${tries - 1}回目までは、合っている伏字だけが開きます。</p>` : ''}
+        </div>`;
+      }
+      const okN = S.locked.filter(Boolean).length;
+      const left = tries - S.attempt;
+      return `<div class="actions retry">
+        <p class="retry-msg">合っている伏字だけを開きました（${okN} / ${S.blanks.length}）。<br>× と △ のところを直して、もう一度答え合わせできます。</p>
+        ${warn}
+        <button class="primary big" data-act="check">答え合わせ（${S.attempt + 1}回目）</button>
+        <p class="muted small tries-note">${left === 1 ? '次がさいごです。答えがすべて出ます。' : `あと${left}回`}</p>
+        <button class="link" data-act="reveal">答えを見る</button>
       </div>`;
     }
     const got = S.blanks.reduce((a, _, i) => a + scoreOf(i), 0);
@@ -448,13 +475,26 @@
     </span>`;
   }
 
-  function check() {
+  // reveal: 「答えを見る」。回数が残っていても、ここで答えをすべて出す
+  function check(reveal) {
     closeEditor();
-    const empty = S.values.some(v => !v.trim());
-    if (empty && !S.warned) { S.warned = true; renderPage(true); focusFirstEmpty(); return; }
-    const results = S.blanks.map((b, i) => b.kind === 'word' ? judgeWord(b, S.values[i]) : judgeSentence(b, S.values[i]));
-    S.raw = results.map(r => r.score);
-    S.yomi = results.map(r => r.yomi || '');
+    const open = S.blanks.map((_, i) => i).filter(i => !S.locked[i]);
+    const empty = open.some(i => !S.values[i].trim());
+    if (!reveal && empty && !S.warned) { S.warned = true; renderPage(true); focusFirstEmpty(); return; }
+    for (const i of open) {
+      const b = S.blanks[i];
+      const r = b.kind === 'word' ? judgeWord(b, S.values[i]) : judgeSentence(b, S.values[i]);
+      S.raw[i] = r.score;
+      S.yomi[i] = r.yomi || '';
+      if (r.score === 1) S.locked[i] = true; else S.missed[i] = r.score;
+    }
+    if (!reveal) S.attempt++;
+    S.warned = false;
+    const remaining = S.locked.some(x => !x);
+    if (!reveal && remaining && S.attempt < maxTries()) {
+      renderPage(true);
+      return;
+    }
     S.self = S.blanks.map(() => false);
     S.checked = true;
     record();
@@ -509,7 +549,7 @@
   // キーボードは下から出るので、窓は画面の上に出す。本文は描き直さず、ページの位置も動かさない
   let edAt = -1;
   let edReturnY = null;
-  const writable = () => S.blanks.map((_, k) => k).filter(k => !(S.blanks[k].kind === 'word' && S.lv.mode === 'choice'));
+  const writable = () => S.blanks.map((_, k) => k).filter(k => !S.locked[k] && !(S.blanks[k].kind === 'word' && S.lv.mode === 'choice'));
 
   function renderContext(i) {
     const p = S.paras[S.paraOf[i]];
@@ -521,7 +561,7 @@
   }
 
   function openEditor(i) {
-    if (!S || S.checked) return;
+    if (!S || S.checked || S.locked[i]) return;
     closeSheet();
     if (edReturnY === null) edReturnY = window.scrollY;
     edAt = i;
@@ -700,6 +740,7 @@
       case 'reader-close': closeReader(); break;
       case 'hint': S.hinted[i] = true; renderPage(true); break;
       case 'check': check(); break;
+      case 'reveal': check(true); break;
       case 'self': S.self[i] = true; record(); renderPage(true); break;
       case 'retry': openPage(S.si, S.pi); break;
       case 'next':
