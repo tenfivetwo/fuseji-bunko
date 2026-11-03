@@ -304,3 +304,15 @@ textarea.code {
 }
 .modal-msg { min-height: 1.4em; color: var(--ok); font-weight: 600; }
 .modal-msg.bad { color: var(--ng); }
+
+/* 良い表現 */
+.great { color: #a8541a; font-weight: 700; font-size: .78em; margin-inline-start: .4em; white-space: nowrap; }
+mark.ok.is-great { box-shadow: inset 0 0 0 1.5px #c98a2e; }
+.great-msg { color: #a8541a; font-weight: 700; }
+.more-goods { margin: .6em auto; max-width: 34em; text-align: start; font-size: .9em; }
+.more-goods summary { cursor: pointer; }
+.more-goods ul { list-style: none; margin: .4em 0 0; padding: 0; }
+.more-goods li { margin: .25em 0; }
+@media (prefers-color-scheme: dark) {
+  .great, .great-msg { color: #e6a95a; }
+}

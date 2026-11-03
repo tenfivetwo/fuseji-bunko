@@ -30,6 +30,7 @@ const re = /\[\[([\s\S]+?)\]\]|\[([^\[\]]+?)\]/g;
 
 let problems = 0;
 const answerCount = {}; // 同じ答えが何度も出ていないかを見るため
+let goodCount = 0, blankCount = 0; // 良い表現がある伏字の数 / Lv.3 以上の伏字の数
 const warn = (where, msg) => { problems++; console.log(`  ${where}: ${msg}`); };
 
 const all = [...window.STORIES];
@@ -50,7 +51,13 @@ for (const st of all) {
     let m;
     while ((m = re.exec(pg.text))) {
       if (m[1] !== undefined) {
-        const [model, kw = ''] = m[1].split('|');
+        const [body, good = ''] = m[1].split('^');
+        const [model, kw = ''] = body.split('|');
+        const goodKeys = good.split(',').filter(Boolean);
+        if (goodKeys.length) goodCount++;
+        if (pg.level >= 3) blankCount++;
+        goodKeys.filter(k => /^[ぁ-ゖ]+$/.test(k) && k.length < 3).forEach(k => warn(where, `良い表現の語「${k}」が短すぎる`));
+        goodKeys.filter(k => norm(model).includes(norm(k))).forEach(k => warn(where, `良い表現の語「${k}」が見本「${model}」に入っている（見本を写すだけで加点になる）`));
         if (pg.level === 5 && model.length > 12) warn(where, `Lv.5 の見本「${model}」が${model.length}文字（12文字以下にする）`);
         if (!kw) warn(where, `見本「${model}」に鍵語がない`);
         if (pg.level < 5) warn(where, `Lv.${pg.level} に句・文の伏字がある`);
@@ -61,7 +68,18 @@ for (const st of all) {
         continue;
       }
       if (pg.level >= 5) warn(where, `Lv.${pg.level} に言葉の伏字 [${m[2]}] がある（句・文の伏字にする）`);
-      const [ans, dum = ''] = m[2].split('|');
+      const [wbody, wgood = ''] = m[2].split('^');
+      const [ans, dum = ''] = wbody.split('|');
+      const goods = wgood.split('/').filter(Boolean);
+      if (pg.level <= 2 && goods.length) warn(where, `Lv.${pg.level} は選ぶ問題なので良い表現は使えない`);
+      if (pg.level >= 3) blankCount++;
+      if (goods.length) {
+        goodCount++;
+        const goodKana = goods.map(norm).filter(isKana);
+        if (!goodKana.length) warn(where, `良い表現 [${wgood}] にひらがなの読みがない`);
+        goods.filter(g => ans.split('/').map(norm).includes(norm(g))).forEach(g => warn(where, `「${g}」がふつうの正解と良い表現の両方にある`));
+        goods.filter(g => hasKanji(g) && goodKana.length && !goodKana.some(r => Yomi.canRead(norm(g), r))).forEach(g => warn(where, `良い表現「${g}」を辞書で ${goodKana.join('/')} と読めない`));
+      }
       const answers = ans.split('/').filter(Boolean);
       answerCount[answers[0]] = (answerCount[answers[0]] || 0) + 1;
       const readings = answers.map(norm).filter(isKana);
@@ -79,6 +97,7 @@ for (const st of all) {
     }
   });
 }
+console.log(`\n良い表現がある伏字: ${goodCount} / ${blankCount}（Lv.3 以上）`);
 const often = Object.entries(answerCount).filter(([, n]) => n >= 5).sort((a, b) => b[1] - a[1]);
 if (often.length) console.log('\n答えによく出る言葉（5回以上）:', often.map(([a, n]) => `${a}×${n}`).join(' '));
 console.log(problems ? `\n${problems} 件の注意があります` : '\n問題ありません');

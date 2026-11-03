@@ -42,7 +42,7 @@
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const DIR_KEY = 'fuseji-bunko-dir';
   let dir = (() => { try { return localStorage.getItem(DIR_KEY) || 'v'; } catch (e) { return 'v'; } })();
-  const stars = r => r >= 0.9 ? '★★★' : r >= 0.6 ? '★★☆' : r > 0 ? '★☆☆' : '☆☆☆';
+  const stars = r => r > 1 ? '★★★✦' : r >= 0.9 ? '★★★' : r >= 0.6 ? '★★☆' : r > 0 ? '★☆☆' : '☆☆☆';
 
   // ---- 記録（ブラウザ内だけ） ----
   function loadAll() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; } }
@@ -111,18 +111,22 @@
       if (m.index > last) parts.push({ t: 'text', v: line.slice(last, m.index) });
       let b;
       if (m[1] !== undefined) {
-        const [model, kw = ''] = m[1].split('|');
+        const [body, good = ''] = m[1].split('^');
+        const [model, kw = ''] = body.split('|');
         b = {
           kind: 'sentence',
           model: model.trim(),
           groups: kw.split(';').map(g => g.split(',').map(s => s.trim()).filter(Boolean)).filter(g => g.length),
+          goods: good.split(',').map(s => s.trim()).filter(Boolean),
         };
       } else {
-        const [ans, dum = ''] = m[2].split('|');
+        const [body, good = ''] = m[2].split('^');
+        const [ans, dum = ''] = body.split('|');
         b = {
           kind: 'word',
           answers: ans.split('/').map(s => s.trim()).filter(Boolean),
           dummies: dum.split('/').map(s => s.trim()).filter(Boolean),
+          goods: good.split('/').map(s => s.trim()).filter(Boolean),
         };
       }
       parts.push({ t: 'blank', i: blanks.length });
@@ -154,11 +158,14 @@
   const Yomi = window.Yomi && window.Yomi.ready ? window.Yomi : null;
   const isKana = s => /^[ぁ-ゖー]+$/.test(s);
 
-  // 結果は { score: 1|0, yomi: 読みが同じで○にしたときの、その読み }
+  // 結果は { score: 1|0, yomi: 読みが同じで○にしたときの、その読み, great: 良い表現だったか }
   function judgeWord(b, v) {
     const n = norm(v);
     if (!n) return { score: 0 };
+    if (b.goods.some(a => norm(a) === n)) return { score: 1, great: true };
     if (b.answers.some(a => norm(a) === n)) return { score: 1 };
+    const goodHit = Yomi && b.goods.map(norm).filter(isKana).find(r => Yomi.canRead(n, r));
+    if (goodHit) return { score: 1, yomi: goodHit, great: true };
     const readings = b.answers.map(norm).filter(isKana);
     const hit = Yomi && readings.find(r => Yomi.canRead(n, r));
     if (hit) return { score: 1, yomi: hit };
@@ -175,6 +182,8 @@
     const n = norm(v);
     if (!n) return { score: 0 };
     if (norm(b.model) === n) return { score: 1 };
+    // 良い表現の言葉が入っていれば、ほかの鍵語がなくても○
+    if (b.goods.some(k => keyHit(n, k))) return { score: 1, great: true };
     const total = b.groups.length;
     if (!total) return { score: 0 };
     const hit = b.groups.filter(g => g.some(k => keyHit(n, k))).length;
@@ -277,7 +286,7 @@
       <details class="levels">
         <summary>難易度のしくみ</summary>
         <dl>${Object.entries(LEVELS).map(([k, l]) => `<dt><span class="lv-badge lv${k}">Lv.${k}</span> ${esc(l.name)}</dt><dd>${esc(l.desc)}</dd>`).join('')}</dl>
-        <p class="muted">Lv.3 からはヒント（最初の文字）を見られます。使った伏字は半分の点になります。<br>Lv.4 からは答え合わせが3回までできます。1・2回目は合っている伏字だけが開き、ちがうところは ×（おしいときは △）の印だけが付きます。3回目で答えがすべて出ます。2回目で合うと半分、3回目で合うと4分の1の点です。<br>文を書く問題は、大事な言葉が入っているかで判定します。判定がきびしすぎると思ったら「この答えでも合っている」で○にできます。</p>
+        <p class="muted">Lv.3 からはヒント（最初の文字）を見られます。使った伏字は半分の点になります。<br>Lv.4 からは答え合わせが3回までできます。1・2回目は合っている伏字だけが開き、ちがうところは ×（おしいときは △）の印だけが付きます。3回目で答えがすべて出ます。2回目で合うと半分、3回目で合うと4分の1の点です。<br>書く問題には、ふつうの正解のほかに「良い表現」が用意されていることがあります。あまり出てこない味わいのある言葉で答えると、1点ではなく1.5点になります。<br>文を書く問題は、大事な言葉が入っているかで判定します。判定がきびしすぎると思ったら「この答えでも合っている」で○にできます。</p>
       </details>
       <p class="foot">
         <button class="link" data-act="export">記録を書き出す</button>
@@ -353,6 +362,7 @@
       // Lv.4 からは答え合わせを3回まで。1・2回目は合っている伏字だけを開き（locked）、ほかは ×／△ の印だけ（missed）
       attempt: 0, locked: blanks.map(() => false), missed: blanks.map(() => 0),
       gotAt: blanks.map(() => 1), // 何回目の答え合わせで決まったか（点の割合に使う）
+      great: blanks.map(() => false), // 良い表現で答えたか
     };
     renderPage();
     window.scrollTo(0, 0);
@@ -466,11 +476,14 @@
     </div>`;
   }
 
-  // 2回目で合えば半分、3回目は4分の1。ヒントを使えばさらに半分
+  // 良い表現なら1.5点。2回目で合えば半分、3回目は4分の1。ヒントを使えばさらに半分
+  const GREAT_POINT = 1.5;
+  const GREAT_WORDS = ['素晴らしい！', '見事な表現！', '味わい深い！', 'うまい！', 'きらりと光る！'];
+  const greatBadge = i => S.great[i] ? `<span class="great">${GREAT_WORDS[i % GREAT_WORDS.length]}</span>` : '';
   const TRY_RATE = [1, 0.5, 0.25];
   const tryRate = i => TRY_RATE[Math.min(S.gotAt[i], TRY_RATE.length) - 1];
   function scoreOf(i) {
-    const s = (S.self[i] ? 1 : S.raw[i]) * tryRate(i);
+    const s = (S.self[i] ? 1 : S.great[i] ? GREAT_POINT : S.raw[i]) * tryRate(i);
     return S.hinted[i] ? s * 0.5 : s;
   }
   function pageRatio() {
@@ -502,16 +515,28 @@
     const got = S.blanks.reduce((a, _, i) => a + scoreOf(i), 0);
     const last = S.pi === S.story.pages.length - 1;
     const r = pageRatio();
-    const msg = r >= 0.9 ? 'おみごと！ よく読めています。' : r >= 0.6 ? 'いい調子です。' : '前後の文をもう一度読んでみましょう。';
+    const greatN = S.great.filter(Boolean).length;
+    const msg = greatN ? `素晴らしい！ 良い表現が${greatN}つありました。` : r >= 0.9 ? 'おみごと！ よく読めています。' : r >= 0.6 ? 'いい調子です。' : '前後の文をもう一度読んでみましょう。';
     return `<div class="score">
       <div class="score-star">${stars(r)}</div>
       <div class="score-num">${fmt(got)} / ${S.blanks.length} 点</div>
-      <p>${msg}</p>
+      <p class="${greatN ? 'great-msg' : ''}">${msg}</p>
+      ${renderMoreGoods()}
       <div class="row center">
         <button data-act="retry">もう一度</button>
         <button class="primary" data-act="next">${nextLabel(last)}</button>
       </div>
     </div>`;
+  }
+  // まだ使っていない良い表現を、答え合わせのあとで見せる
+  function goodsToShow(b) {
+    const kanji = b.goods.filter(g => !isKana(norm(g)));
+    const kana = b.goods.filter(g => isKana(norm(g)) && !(Yomi && kanji.some(k => Yomi.canRead(norm(k), norm(g)))));
+    return [...kanji, ...kana].map(g => b.kind === 'word' ? g : g + '…');
+  }
+  function renderMoreGoods() {
+    const rows = S.blanks.map((b, i) => S.great[i] || !b.goods.length ? '' : `<li><span class="num">${num(i)}</span>${esc(goodsToShow(b).join('、'))}</li>`).join('');
+    return rows ? `<details class="more-goods"><summary>こんな表現だと点が上がります</summary><ul>${rows}</ul></details>` : '';
   }
   function nextLabel(last) {
     if (S.story.collection) {
@@ -531,7 +556,7 @@
       + (S.gotAt[i] > 1 && (ok || S.raw[i] > 0) ? `<span class="muted small">（${S.gotAt[i]}回目）</span>` : '');
     if (b.kind === 'word') {
       const yomiNote = S.yomi[i] && !S.self[i] ? `<span class="muted small">（読みが同じ：${esc(S.yomi[i])}）</span>` : '';
-      if (ok) return `<mark class="ok"><span class="num">${num(i)}</span>${esc(v)}${hintNote}${yomiNote}</mark>`;
+      if (ok) return `<mark class="ok ${S.great[i] ? 'is-great' : ''}"><span class="num">${num(i)}</span>${esc(v)}${greatBadge(i)}${hintNote}${yomiNote}</mark>`;
       return `<span class="ng"><span class="num">${num(i)}</span><s>${v ? esc(v) : '空欄'}</s><b>${esc(b.answers[0])}</b></span>`;
     }
     const mark = ok ? '○' : S.raw[i] > 0 ? '△' : '×';
@@ -539,10 +564,10 @@
     const selfBtn = !ok && v ? `<button class="chip" data-act="self" data-i="${i}">この答えでも合っている</button>` : '';
     const same = norm(v) === norm(b.model);
     if (isPhrase(b)) {
-      return `<span class="phr-res ${cls}"><span class="num">${num(i)}</span><span class="mark">${mark}</span>${v ? esc(v) : '（空欄）'}${hintNote}${S.self[i] ? '<span class="muted small">（自分で○）</span>' : ''}${same ? '' : `<span class="model">見本：${esc(b.model)}</span>`}</span>${selfBtn}`;
+      return `<span class="phr-res ${cls}"><span class="num">${num(i)}</span><span class="mark">${mark}</span>${v ? esc(v) : '（空欄）'}${greatBadge(i)}${hintNote}${S.self[i] ? '<span class="muted small">（自分で○）</span>' : ''}${same ? '' : `<span class="model">見本：${esc(b.model)}</span>`}</span>${selfBtn}`;
     }
     return `<span class="sent-res ${cls}">
-      <span class="sent-head"><span class="num">${num(i)}</span><span class="mark">${mark}</span>${hintNote}${S.self[i] ? '<span class="muted small">（自分で○にした）</span>' : ''}</span>
+      <span class="sent-head"><span class="num">${num(i)}</span><span class="mark">${mark}</span>${greatBadge(i)}${hintNote}${S.self[i] ? '<span class="muted small">（自分で○にした）</span>' : ''}</span>
       <span class="yours">${v ? esc(v) : '（空欄）'}</span>
       ${same ? '' : `<span class="model">見本：${esc(b.model)}</span>`}
       ${selfBtn}
@@ -560,6 +585,7 @@
       const r = b.kind === 'word' ? judgeWord(b, S.values[i]) : judgeSentence(b, S.values[i]);
       S.raw[i] = r.score;
       S.yomi[i] = r.yomi || '';
+      S.great[i] = !!r.great;
       S.gotAt[i] = Math.min(S.attempt + 1, maxTries());
       if (r.score === 1) S.locked[i] = true; else S.missed[i] = r.score;
     }
