@@ -12,17 +12,24 @@
   const STORE_KEY = 'fuseji-bunko-v1';
   const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
   const STORIES = window.STORIES || [];
-  // 1ページで終わる短い話（shorts/*.js）は「ひとページ百話」として目次のいちばん上に置く
+  // 1ページで終わる短い話は「ひとページ文庫」として目次のいちばん上に置く
+  // 記録は pages の番号で残す。話を足すときは shorts2 の後ろに足し、今ある話の番号を変えない（変えると記録がずれる）
+  // 読む順番（難易度順）は order に持つ
   const SHORTS = window.SHORTS || [];
+  const SHORTS2 = window.SHORTS2 || [];
   if (SHORTS.length) {
+    const pages = [...SHORTS].sort((a, b) => a.level - b.level).concat(SHORTS2);
     STORIES.unshift({
       id: 'hyakuwa',
-      title: 'ひとページ百話',
+      title: 'ひとページ文庫',
       intro: '1ページで終わる短い話。やさしい話から順に並んでいます。同じ難易度を3話こなすと、次の難易度が開きます。',
       collection: true,
-      pages: [...SHORTS].sort((a, b) => a.level - b.level),
+      pages,
+      order: pages.map((_, i) => i).sort((a, b) => pages[a].level - pages[b].level || a - b),
     });
   }
+  // 短編集で目次に出す番号（第何話か）
+  const storyNo = (st, pi) => st.order.indexOf(pi) + 1;
   const UNLOCK_COUNT = 3;
   const app = document.getElementById('app');
   const sheet = document.getElementById('sheet');
@@ -214,11 +221,17 @@
   function isOpen(st, p, pi) {
     return st.collection ? levelOpen(st, p, st.pages[pi].level) : pi <= p.reached;
   }
+  // まだ読んでいない開いている話のうち、いちばん前のもの（なければ -1）
+  function firstUnread(st, p) {
+    const k = st.order.find(k => isOpen(st, p, k) && p.best[k] === undefined);
+    return k === undefined ? -1 : k;
+  }
   // 次に開く話：pi より後ろで開いているもの → なければ、まだ読んでいない開いている話
   function nextOpen(st, pi) {
     const p = getProg(st.id);
-    for (let k = pi + 1; k < st.pages.length; k++) if (isOpen(st, p, k)) return k;
-    return st.pages.findIndex((_, k) => isOpen(st, p, k) && p.best[k] === undefined);
+    const later = st.order.slice(st.order.indexOf(pi) + 1);
+    const k = later.find(k => isOpen(st, p, k));
+    return k !== undefined ? k : firstUnread(st, p);
   }
 
   // ---- 状態 ----
@@ -280,7 +293,7 @@
   // 短編集の目次：難易度ごとにまとめる
   function renderCollection(st, si) {
     const p = getProg(st.id);
-    const unread = st.pages.findIndex((_, k) => isOpen(st, p, k) && p.best[k] === undefined);
+    const unread = firstUnread(st, p);
     const anyPlayed = Object.keys(p.best).length > 0;
     const lvs = levelsOf(st);
     const openLvs = lvs.filter(lv => levelOpen(st, p, lv));
@@ -291,7 +304,7 @@
         <p class="intro">${esc(st.intro || '')}</p>
         <div class="row">
           ${!anyPlayed ? `<button class="primary" data-act="open" data-s="${si}" data-p="0">第1話から</button>`
-            : unread >= 0 ? `<button class="primary" data-act="open" data-s="${si}" data-p="${unread}">つづきから（第${unread + 1}話）</button>` : ''}
+            : unread >= 0 ? `<button class="primary" data-act="open" data-s="${si}" data-p="${unread}">つづきから（第${storyNo(st, unread)}話）</button>` : ''}
           <button data-act="random" data-s="${si}">おまかせで1話</button>
           <span class="muted small">読んだ話 ${Object.keys(p.best).length} / ${st.pages.length}</span>
         </div>
@@ -309,7 +322,7 @@
               ${idx.map(pi => {
                 const best = p.best[pi];
                 return `<li><button class="toc-item" data-act="open" data-s="${si}" data-p="${pi}" ${open ? '' : 'disabled'}>
-                  <span class="toc-no">${pi + 1}</span>
+                  <span class="toc-no">${storyNo(st, pi)}</span>
                   <span class="toc-title">${open ? esc(st.pages[pi].title) : '？？？'}</span>
                   <span class="lv-badge lv${lv}">Lv.${lv}</span>
                   <span class="toc-star">${best === undefined ? '' : stars(best)}</span>
@@ -356,7 +369,7 @@
       <nav class="bar">
         <button class="link" data-act="home">← 目次</button>
         <span class="bar-title">${esc(story.title)}</span>
-        <span class="bar-page">${story.collection ? `第${pi + 1}話` : `${pi + 1} / ${story.pages.length}`}</span>
+        <span class="bar-page">${story.collection ? `第${storyNo(story, pi)}話` : `${pi + 1} / ${story.pages.length}`}</span>
         ${dirSwitch()}
       </nav>
       ${levelUp ? `<div class="levelup">難易度アップ！　<b>Lv.${page.level} ${esc(lv.name)}</b><br>${esc(lv.desc)}</div>` : ''}

@@ -12,7 +12,10 @@ require('../stories.js');
 const fs = require('fs');
 const path = require('path');
 const shortsDir = path.join(__dirname, '..', 'shorts');
-for (const f of fs.readdirSync(shortsDir).filter(f => f.endsWith('.js')).sort()) require(path.join(shortsDir, f));
+const shorts2Dir = path.join(__dirname, '..', 'shorts2');
+for (const dir of [shortsDir, shorts2Dir]) {
+  for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort()) require(path.join(dir, f));
+}
 require('../kanji.js');
 require('../yomi.js');
 const Yomi = window.Yomi;
@@ -26,15 +29,17 @@ const hasKanji = s => /[㐀-鿿々]/.test(s);
 const re = /\[\[([\s\S]+?)\]\]|\[([^\[\]]+?)\]/g;
 
 let problems = 0;
+const answerCount = {}; // 同じ答えが何度も出ていないかを見るため
 const warn = (where, msg) => { problems++; console.log(`  ${where}: ${msg}`); };
 
 const all = [...window.STORIES];
-if (window.SHORTS && window.SHORTS.length) {
-  all.push({ title: `ひとページ百話（${window.SHORTS.length}話）`, pages: [...window.SHORTS].sort((a, b) => a.level - b.level) });
+const shorts = [...(window.SHORTS || []), ...(window.SHORTS2 || [])];
+if (shorts.length) {
+  all.push({ title: `ひとページ文庫（${shorts.length}話）`, pages: [...shorts].sort((a, b) => a.level - b.level) });
   const byLv = {};
-  window.SHORTS.forEach(pg => { byLv[pg.level] = (byLv[pg.level] || 0) + 1; });
+  shorts.forEach(pg => { byLv[pg.level] = (byLv[pg.level] || 0) + 1; });
   console.log('短編の数（難易度ごと）:', JSON.stringify(byLv));
-  const titles = window.SHORTS.map(pg => pg.title);
+  const titles = shorts.map(pg => pg.title);
   titles.filter((t, i) => titles.indexOf(t) !== i).forEach(t => { problems++; console.log(`  題名が重複: ${t}`); });
 }
 
@@ -46,6 +51,8 @@ for (const st of all) {
     while ((m = re.exec(pg.text))) {
       if (m[1] !== undefined) {
         const [model, kw = ''] = m[1].split('|');
+        if (pg.level === 5 && model.length > 12) warn(where, `Lv.5 の見本「${model}」が${model.length}文字（12文字以下にする）`);
+        if (!kw) warn(where, `見本「${model}」に鍵語がない`);
         if (pg.level < 5) warn(where, `Lv.${pg.level} に句・文の伏字がある`);
         kw.split(';').map(g => g.split(',')).forEach(g => {
           g.filter(k => /^[ぁ-ゖ]$/.test(k)).forEach(k => warn(where, `鍵語「${k}」は1文字のかなで、何にでも当たってしまう`));
@@ -56,6 +63,7 @@ for (const st of all) {
       if (pg.level >= 5) warn(where, `Lv.${pg.level} に言葉の伏字 [${m[2]}] がある（句・文の伏字にする）`);
       const [ans, dum = ''] = m[2].split('|');
       const answers = ans.split('/').filter(Boolean);
+      answerCount[answers[0]] = (answerCount[answers[0]] || 0) + 1;
       const readings = answers.map(norm).filter(isKana);
       if (!readings.length) warn(where, `[${ans}] にひらがなの読みがない`);
       for (const a of answers.filter(a => hasKanji(a) && !/[0-9０-９]/.test(a))) {
@@ -71,4 +79,6 @@ for (const st of all) {
     }
   });
 }
+const often = Object.entries(answerCount).filter(([, n]) => n >= 5).sort((a, b) => b[1] - a[1]);
+if (often.length) console.log('\n答えによく出る言葉（5回以上）:', often.map(([a, n]) => `${a}×${n}`).join(' '));
 console.log(problems ? `\n${problems} 件の注意があります` : '\n問題ありません');
