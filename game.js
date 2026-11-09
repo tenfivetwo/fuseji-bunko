@@ -54,6 +54,7 @@
   // ホーム画面のアイコンを入れ替えたり端末を替えたりしても、記録を持ち運べるようにする。
   // 記録（STORE_KEY）と文字の向き（DIR_KEY）を JSON にして、「FUSEJI1:」付きの文字列（base64）にする
   const EXPORTED_KEY = 'fuseji-bunko-exported'; // 最後に書き出した日
+  const LASTLV_KEY = 'fuseji-bunko-lastlv'; // 短編集で最後に開いた話の難易度（目次でその難易度を開いておく）
   const CODE_HEAD = 'FUSEJI1:';
   function storageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function storageSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
@@ -249,6 +250,8 @@
   // ---- 目次 ----
   function renderHome() {
     closeEditor(false);
+    // 短編集の話から戻ったときは、その話が見える位置まで目次を送る
+    const back = S && S.story.collection ? { si: S.si, pi: S.pi } : null;
     S = null;
     closeSheet();
     closeReader();
@@ -297,6 +300,8 @@
       <p class="foot credit">漢字の読み：<a href="https://www.edrdg.org/wiki/index.php/KANJIDIC_Project" target="_blank" rel="noopener">KANJIDIC2</a>（EDRDG, CC BY-SA 4.0）</p>`;
     applyDir();
     window.scrollTo(0, 0);
+    const item = back && app.querySelector(`.toc-item[data-s="${back.si}"][data-p="${back.pi}"]`);
+    if (item) item.scrollIntoView({ block: 'center' });
   }
 
   // 短編集の目次：難易度ごとにまとめる
@@ -306,7 +311,9 @@
     const anyPlayed = Object.keys(p.best).length > 0;
     const lvs = levelsOf(st);
     const openLvs = lvs.filter(lv => levelOpen(st, p, lv));
-    const showLv = openLvs[openLvs.length - 1];
+    // 最後に読んだ話の難易度を開く（まだ読んでいなければ、開いている中でいちばん上の難易度）
+    const lastLv = Number(storageGet(LASTLV_KEY));
+    const showLv = openLvs.includes(lastLv) ? lastLv : openLvs[openLvs.length - 1];
     return `
       <section class="story">
         <h2>${esc(st.title)}</h2>
@@ -347,6 +354,7 @@
   function openPage(si, pi) {
     const story = STORIES[si];
     const page = story.pages[pi];
+    if (story.collection) storageSet(LASTLV_KEY, String(page.level));
     const { blanks, paras } = parsePage(page.text);
     closeReader();
     closeEditor(false);
